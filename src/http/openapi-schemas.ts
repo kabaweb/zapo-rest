@@ -75,6 +75,30 @@ export const EXAMPLES = {
     callId: 'ABCDEF0123456789',
     peerJid: '5511888888888@s.whatsapp.net',
   },
+  blast: {
+    to: '5511888888888',
+    audioUrl: 'https://example.com/message.wav',
+    responseTimeoutMs: 5000,
+    callTimeoutMs: 30000,
+    recordResponse: true,
+    transcribe: true,
+    sttLanguage: 'pt',
+  },
+  blastResponse: {
+    callId: 'ABCDEF0123456789',
+    peerJid: '5511888888888@s.whatsapp.net',
+    audioPlayed: true,
+    recordingUrl: '/v1/instances/sales-1/calls/ABCDEF0123456789/recording',
+    responseDurationMs: 3200,
+    totalDurationMs: 18400,
+    transcription: 'Olá, tudo bem? Gostaria de confirmar minha consulta.',
+  },
+  transcribeResponse: {
+    text: 'Olá, tudo bem? Eu gostaria de confirmar minha consulta.',
+    language: 'pt',
+    durationSecs: 3.2,
+    callId: 'ABCDEF0123456789',
+  },
   callInfo: {
     callId: 'ABCDEF0123456789',
     peerJid: '5511888888888@s.whatsapp.net',
@@ -540,6 +564,71 @@ export const MuteBodySchema = z
     muted: z.boolean().meta({ description: 'true = mute local mic', example: true }),
   })
   .meta({ example: { muted: true } })
+
+export const BlastBodySchema = z
+  .object({
+    to: RecipientToSchema.meta({ description: 'Phone number to call' }),
+    audioUrl: z.string().url().meta({
+      description:
+        'URL to a WAV audio file (PCM, 16 kHz mono recommended). Other sample rates and channel counts are resampled.',
+      example: 'https://example.com/message.wav',
+    }),
+    responseTimeoutMs: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(60_000)
+      .optional()
+      .default(5_000)
+      .meta({ description: 'Time to wait for a spoken response after the audio finishes (ms)', example: 5000 }),
+    callTimeoutMs: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(120_000)
+      .optional()
+      .default(30_000)
+      .meta({ description: 'Max time to wait for the callee to answer (ms)', example: 30000 }),
+    recordResponse: z
+      .boolean()
+      .optional()
+      .default(true)
+      .meta({ description: 'Record the remote audio response. Requires media storage.', example: true }),
+    transcribe: z
+      .boolean()
+      .optional()
+      .meta({ description: 'Transcribe the recorded response via STT (Groq/OpenAI). Auto-enabled when STT env vars are configured. Set false to opt out.', example: true }),
+    sttLanguage: z
+      .string()
+      .optional()
+      .meta({ description: 'Language hint for transcription (ISO 639-1, e.g. pt). Overrides STT_LANGUAGE env.', example: 'pt' }),
+  })
+  .meta({
+    description: 'Start an outbound VoIP call, play a WAV audio file when answered, and optionally record the response.',
+    example: EXAMPLES.blast,
+  })
+
+export const BlastResponseSchema = z
+  .object({
+    callId: z.string().meta({ example: 'ABCDEF0123456789' }),
+    peerJid: z.string().meta({ example: '5511888888888@s.whatsapp.net' }),
+    audioPlayed: z.boolean().meta({ example: true }),
+    recordingUrl: z.string().nullable().meta({ example: '/v1/instances/sales-1/calls/ABCDEF0123456789/recording' }),
+    responseDurationMs: z.number().int().nonnegative().meta({ example: 3200 }),
+    totalDurationMs: z.number().int().nonnegative().meta({ example: 18400 }),
+    transcription: z.string().nullable().optional().meta({ example: 'Olá, tudo bem? Gostaria de confirmar...' }),
+    error: z.string().optional(),
+  })
+  .meta({ example: EXAMPLES.blastResponse })
+
+export const TranscribeResponseSchema = z
+  .object({
+    text: z.string().meta({ description: 'Transcribed text from the recording', example: 'Olá, tudo bem?' }),
+    language: z.string().nullable().meta({ example: 'pt' }),
+    durationSecs: z.number().nullable().meta({ example: 3.2 }),
+    callId: z.string().meta({ example: 'ABCDEF0123456789' }),
+  })
+  .meta({ example: EXAMPLES.transcribeResponse })
 
 export const CallReasonBodySchema = z
   .object({

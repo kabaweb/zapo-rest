@@ -159,6 +159,18 @@ const envSchema = z
 
     /** Max call PCM recording duration in seconds (default 2h). Further samples are dropped. */
     CALL_RECORDING_MAX_SECONDS: z.coerce.number().int().positive().default(7200),
+
+    /** Speech-to-text transcription (Groq Whisper or OpenAI-compatible API). */
+    STT_ENABLED: boolFromString.default(false),
+    /** Base URL e.g. https://api.groq.com/openai */
+    STT_API_URL: z.string().url().optional(),
+    STT_API_KEY: z.string().optional(),
+    /** Model name (defaults to whisper-large-v3 for Groq, whisper-1 for OpenAI). */
+    STT_MODEL: z.string().optional(),
+    /** Language hint for STT (ISO 639-1, e.g. pt, en, es). Omit for auto-detect. */
+    STT_LANGUAGE: z.string().optional(),
+    /** Sampling temperature (0–1). Default 0.5. */
+    STT_TEMPERATURE: z.coerce.number().min(0).max(1).optional().default(0.5),
   })
   .superRefine(assertStrongAdminKeyInProd)
 
