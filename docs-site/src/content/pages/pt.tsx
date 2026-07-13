@@ -551,7 +551,9 @@ curl -s "$BASE/v1/instances/sales-1/qr" -H "X-Api-Key: $ADMIN_API_KEY"`}
               <td>
                 <code>message.media.failed</code>
               </td>
-              <td>Falha no download/store após retries (<code>mediaStage: "failed"</code> + erro)</td>
+              <td>
+                Falha no download/store após retries (<code>mediaStage: "failed"</code> + erro)
+              </td>
             </tr>
           </tbody>
         </table>

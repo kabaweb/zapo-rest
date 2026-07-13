@@ -56,9 +56,7 @@ export class InstanceRepo {
 
   /** Resolve an instance by its plaintext key via the stored SHA-256 hash. */
   async getByApiKey(apiKey: string): Promise<InstanceRecord | null> {
-    const { rows } = await this.pool.query<Row>('SELECT * FROM instances WHERE api_key_hash = $1', [
-      hashApiKey(apiKey),
-    ])
+    const { rows } = await this.pool.query<Row>('SELECT * FROM instances WHERE api_key_hash = $1', [hashApiKey(apiKey)])
     const row = rows[0]
     return row ? mapRow(row) : null
   }

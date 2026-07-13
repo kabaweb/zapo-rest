@@ -23,7 +23,10 @@ type OutboxRow = {
   status: string
 }
 
-type OutboxEnv = Pick<Env, 'WEBHOOK_TIMEOUT_MS' | 'WEBHOOK_WORKER_INTERVAL_MS' | 'WEBHOOK_DEFAULT_ATTEMPTS' | 'NODE_ENV'>
+type OutboxEnv = Pick<
+  Env,
+  'WEBHOOK_TIMEOUT_MS' | 'WEBHOOK_WORKER_INTERVAL_MS' | 'WEBHOOK_DEFAULT_ATTEMPTS' | 'NODE_ENV'
+>
 
 /** Max deliveries in flight at once so one slow endpoint can't stall the batch. */
 const DELIVERY_CONCURRENCY = 8

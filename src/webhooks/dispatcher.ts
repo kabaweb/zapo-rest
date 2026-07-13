@@ -50,7 +50,10 @@ export type WebhookDispatcherDeps = {
 
 export class WebhookDispatcher {
   private readonly log = getLogger({ component: 'webhook' })
-  private readonly env: Pick<Env, 'WEBHOOK_TIMEOUT_MS'> & { WEBHOOK_DEFAULT_ATTEMPTS?: number; NODE_ENV?: Env['NODE_ENV'] }
+  private readonly env: Pick<Env, 'WEBHOOK_TIMEOUT_MS'> & {
+    WEBHOOK_DEFAULT_ATTEMPTS?: number
+    NODE_ENV?: Env['NODE_ENV']
+  }
   private readonly allowHttp: boolean
   private readonly webhookRepo?: WebhookConfigRepo
   private readonly outbox?: WebhookOutbox

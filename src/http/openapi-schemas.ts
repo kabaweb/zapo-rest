@@ -133,9 +133,7 @@ export const EXAMPLES = {
 } as const
 
 /** Read-view example: reads never expose `apiKey` (stored hashed). */
-const INSTANCE_READ_EXAMPLE = Object.fromEntries(
-  Object.entries(EXAMPLES.instance).filter(([key]) => key !== 'apiKey'),
-)
+const INSTANCE_READ_EXAMPLE = Object.fromEntries(Object.entries(EXAMPLES.instance).filter(([key]) => key !== 'apiKey'))
 
 export const ErrorBodySchema = z
   .object({

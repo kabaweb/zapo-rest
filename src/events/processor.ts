@@ -621,8 +621,7 @@ export class EventProcessor {
           msg?.documentMessage?.mimetype ??
           msg?.stickerMessage?.mimetype ??
           undefined
-        const filename =
-          opts?.mediaFilename ?? (msg?.documentMessage?.fileName as string | undefined) ?? undefined
+        const filename = opts?.mediaFilename ?? (msg?.documentMessage?.fileName as string | undefined) ?? undefined
         // Content-addressed put: same bytes on this instance → one object (inbound + outbound share).
         const stored = await this.deps.mediaStorage.put(instanceName, buf, {
           mimeType: mime,
@@ -694,7 +693,11 @@ export class EventProcessor {
       sha256: string | null
     },
   ): Promise<void> {
-    const claimed = await this.deps.idempotency.tryClaim(instanceName, `media-store:${messageId}`, 'message.media.stored')
+    const claimed = await this.deps.idempotency.tryClaim(
+      instanceName,
+      `media-store:${messageId}`,
+      'message.media.stored',
+    )
     if (!claimed) return
     const row = await this.deps.instanceRepo.getByName(instanceName)
     if (!row) return
@@ -727,7 +730,11 @@ export class EventProcessor {
       error: string
     },
   ): Promise<void> {
-    const claimed = await this.deps.idempotency.tryClaim(instanceName, `media-fail:${messageId}`, 'message.media.failed')
+    const claimed = await this.deps.idempotency.tryClaim(
+      instanceName,
+      `media-fail:${messageId}`,
+      'message.media.failed',
+    )
     if (!claimed) return
     const row = await this.deps.instanceRepo.getByName(instanceName)
     if (!row) return
