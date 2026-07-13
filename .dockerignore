@@ -1,0 +1,40 @@
+# VCS / IDE
+.git
+.github
+.idea
+.vscode
+*.md
+!README.md
+
+# Secrets & local env
+.env
+.env.*
+!.env.example
+
+# Dependencies & build outputs (rebuilt in image)
+node_modules
+dashboard/node_modules
+docs-site/node_modules
+dist
+dashboard/dist
+docs-site/dist
+coverage
+tmp
+.auth
+*.log
+
+# Tests & tooling not needed in image build
+tests
+**/*.test.ts
+**/*.spec.ts
+vitest.config*.ts
+biome.json
+# tsconfig.json + tsconfig.build.json MUST be in context (build-api COPY)
+
+# Docs site: node_modules rebuilt in stage; keep sources for build-docs
+docs-site/node_modules
+docs/screenshots
+
+# OS junk
+.DS_Store
+Thumbs.db

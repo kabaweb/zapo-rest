@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>zapo-rest · Documentação</title>
+    <meta name="description" content="Documentação completa da API zapo-rest — WhatsApp multi-session REST + VoIP" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('zapo-docs-theme')
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          }
+          var root = document.documentElement
+          if (t === 'dark') {
+            root.classList.add('dark')
+            root.style.colorScheme = 'dark'
+          } else {
+            root.classList.remove('dark')
+            root.style.colorScheme = 'light'
+          }
+          var lang = localStorage.getItem('zapo-docs-locale')
+          if (lang === 'en' || lang === 'es' || lang === 'pt-BR') {
+            root.lang = lang === 'pt-BR' ? 'pt-BR' : lang
+          }
+        } catch (e) {}
+      })()
+    </script>
+  </head>
+  <body class="antialiased">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

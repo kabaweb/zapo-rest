@@ -1,0 +1,118 @@
+# Local / demo stack. Defaults are intentionally weak — never expose to the public
+# internet as-is. See README “Production checklist” and docs/PRODUCTION-CONSISTENCY.md.
+#
+# Images pinned to immutable tags + digests for reproducible pulls.
+# Override with a compose.override.yml if you need newer patch versions.
+
+services:
+  postgres:
+    image: postgres:16.8-alpine@sha256:3b057e1c2c6dfee60a30950096f3fab33be141dbb0fdd7af3d477083de94166c
+    environment:
+      POSTGRES_USER: zapo
+      POSTGRES_PASSWORD: zapo
+      POSTGRES_DB: zapo
+    ports:
+      - '5555:5432'
+    volumes:
+      - zapo_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zapo -d zapo']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    ports:
+      - '16379:6379'
+    volumes:
+      - zapo_redis:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    # DEV ONLY credentials below — replace via env for any shared host.
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      # Host 19000 → container API 9000 (avoid clash with other MinIOs on :9000)
+      - '19000:9000'
+      - '19001:9001'
+    volumes:
+      - zapo_minio:/data
+    healthcheck:
+      # minio image has curl; do not use `mc` (not in server image)
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\";
+      mc mb -p local/zapo-media || true;
+      mc anonymous set download local/zapo-media || true;
+      mc ls local/zapo-media;
+      exit 0;
+      "
+
+  api:
+    build: .
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: info
+      # Must be ≥ 16 chars. Override: ADMIN_API_KEY=$(openssl rand -hex 24) docker compose up
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
+      DATABASE_URL: postgresql://zapo:zapo@postgres:5432/zapo
+      REDIS_URL: redis://redis:6379
+      AUTO_CONNECT_ON_BOOT: 'true'
+      RECONNECT_MAX_ATTEMPTS: '10'
+      WEBHOOK_TIMEOUT_MS: '5000'
+      VOIP_MAX_CONCURRENT_CALLS: '10'
+      VOIP_END_CALL_ON_WS_CLOSE: 'false'
+      MEDIA_TMP_DIR: /tmp/zapo-rest-media
+      HISTORY_SYNC_ENABLED: 'true'
+      MEDIA_AUTO_DOWNLOAD: 'true'
+      MEDIA_STORAGE: s3
+      # In-network endpoint for the API container
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: zapo-media
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_FORCE_PATH_STYLE: 'true'
+      # Public URL for browsers / webhooks (host port map)
+      S3_PUBLIC_URL: http://localhost:19000/zapo-media
+      S3_PRESIGN_ENDPOINT: http://localhost:19000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  zapo_pg:
+  zapo_redis:
+  zapo_minio:

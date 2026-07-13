@@ -1,0 +1,374 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ADMIN_KEY, buildMockedWaApp, INSTANCE, INSTANCE_KEY, type MockWaApp } from '../helpers/mock-wa-app'
+
+describe('route handlers with mocked WA client', () => {
+  let ctx: MockWaApp
+  const key = { 'x-api-key': INSTANCE_KEY }
+  const admin = { 'x-api-key': ADMIN_KEY }
+
+  beforeAll(async () => {
+    ctx = await buildMockedWaApp()
+  })
+
+  afterAll(async () => {
+    await ctx.app.close()
+  })
+
+  describe('messages', () => {
+    it('POST text sends via client and stores message', async () => {
+      const res = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/text`,
+        headers: key,
+        payload: { to: '5511999999999', text: 'hello sprint c' },
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { id: string }
+      expect(body.id).toMatch(/^3EB0/)
+      expect(ctx.client.message.send).toHaveBeenCalled()
+      const stored = await ctx.messages.get(INSTANCE, body.id)
+      expect(stored?.body).toBe('hello sprint c')
+      expect(stored?.fromMe).toBe(true)
+    })
+
+    it('POST location / poll / react hit client', async () => {
+      const loc = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/location`,
+        headers: key,
+        payload: { to: '5511888888888', latitude: -23.5, longitude: -46.6, name: 'SP' },
+      })
+      expect(loc.statusCode).toBe(200)
+
+      const poll = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/poll`,
+        headers: key,
+        payload: { to: '5511888888888', name: 'lunch?', options: ['a', 'b'] },
+      })
+      expect(poll.statusCode).toBe(200)
+
+      const react = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/react`,
+        headers: key,
+        payload: { to: '5511888888888', messageId: 'MSGX', emoji: '👍' },
+      })
+      expect(react.statusCode).toBe(200)
+      expect(ctx.client.message.send.mock.calls.length).toBeGreaterThanOrEqual(3)
+    })
+  })
+
+  describe('chats', () => {
+    it('lists and gets chats + messages from memory store', async () => {
+      await ctx.chats.upsert({
+        instanceName: INSTANCE,
+        chatJid: '5511888888888@s.whatsapp.net',
+        name: 'Cliente',
+        lastMessagePreview: 'oi',
+        lastMessageTs: Date.now(),
+        unreadCount: 2,
+      })
+      await ctx.messages.upsert({
+        instanceName: INSTANCE,
+        messageId: 'CHATMSG1',
+        chatJid: '5511888888888@s.whatsapp.net',
+        fromMe: false,
+        type: 'text',
+        body: 'oi',
+        timestampMs: Date.now(),
+      })
+
+      const list = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/chats`,
+        headers: key,
+      })
+      expect(list.statusCode).toBe(200)
+      expect((list.json() as { chats: unknown[] }).chats.length).toBeGreaterThanOrEqual(1)
+
+      const one = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/chats/${encodeURIComponent('5511888888888@s.whatsapp.net')}`,
+        headers: key,
+      })
+      expect(one.statusCode).toBe(200)
+
+      const msgs = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/chats/${encodeURIComponent('5511888888888@s.whatsapp.net')}/messages`,
+        headers: key,
+      })
+      expect(msgs.statusCode).toBe(200)
+      const payload = msgs.json() as { messages: Array<{ id?: string; body?: string }> }
+      expect(payload.messages.length).toBeGreaterThanOrEqual(1)
+      expect(payload.messages.some((m) => m.body === 'oi')).toBe(true)
+    })
+  })
+
+  describe('contacts', () => {
+    it('lists contacts and builds local jid', async () => {
+      await ctx.contacts.upsert({
+        instanceName: INSTANCE,
+        jid: '5511777777777@s.whatsapp.net',
+        pushName: 'Zé',
+      })
+      const list = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/contacts`,
+        headers: key,
+      })
+      expect(list.statusCode).toBe(200)
+      expect((list.json() as { contacts: unknown[] }).contacts.length).toBeGreaterThanOrEqual(1)
+
+      const jid = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/contacts/jid`,
+        headers: key,
+        payload: { numbers: ['11999999999'] },
+      })
+      expect(jid.statusCode).toBe(200)
+    })
+
+    it('check/resolve uses profile.getLidsByPhoneNumbers', async () => {
+      const check = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/contacts/check`,
+        headers: key,
+        payload: { phones: ['5511999999999'] },
+      })
+      expect(check.statusCode).toBe(200)
+      expect(ctx.client.profile.getLidsByPhoneNumbers).toHaveBeenCalled()
+
+      const resolve = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/contacts/resolve`,
+        headers: key,
+        payload: { numbers: ['5511888888888'] },
+      })
+      expect(resolve.statusCode).toBe(200)
+    })
+  })
+
+  describe('groups', () => {
+    // Regression for P0-1: the handler must CALL client.group.queryAllGroups() and
+    // return the resolved array. A missing `()` returned the bound method/Promise, so a
+    // shape assert (array of group objects) is required — a status-200 check would not catch it.
+    it('lists groups from client as an array of group objects', async () => {
+      const res = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/groups`,
+        headers: key,
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { groups: Array<{ id?: string; subject?: string }> }
+      expect(Array.isArray(body.groups)).toBe(true)
+      expect(body.groups.length).toBeGreaterThanOrEqual(1)
+      expect(body.groups[0]).toMatchObject({ id: '120363@g.us', subject: 'Test Group' })
+      expect(ctx.client.group.queryAllGroups).toHaveBeenCalled()
+    })
+  })
+
+  describe('blocklist', () => {
+    // Regression for P0-2: the handler must CALL client.privacy.getBlocklist() and
+    // return the resolved array under `blocklist`.
+    it('returns blocklist from client as an array', async () => {
+      const res = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/blocklist`,
+        headers: key,
+      })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { blocklist: unknown[] }
+      expect(Array.isArray(body.blocklist)).toBe(true)
+      expect(body.blocklist).toContain('5511000000000@s.whatsapp.net')
+      expect(ctx.client.privacy.getBlocklist).toHaveBeenCalled()
+    })
+  })
+
+  describe('labels', () => {
+    it('CRUD labels via store + chat.set on create', async () => {
+      const create = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/labels`,
+        headers: key,
+        payload: { id: 'vip', name: 'VIP', color: 1 },
+      })
+      expect(create.statusCode).toBe(200)
+      expect(ctx.client.chat.set).toHaveBeenCalled()
+
+      const list = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/labels`,
+        headers: key,
+      })
+      expect(list.statusCode).toBe(200)
+      expect((list.json() as { labels: Array<{ id: string }> }).labels.some((l) => l.id === 'vip')).toBe(true)
+    })
+  })
+
+  describe('lids', () => {
+    it('lists and counts lid mappings', async () => {
+      ctx.lids.seed({
+        lid: '123@lid',
+        pn: '5511999999999',
+        displayName: 'A',
+        pushName: 'A',
+        source: 'app_contacts',
+      })
+      const list = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/lids`,
+        headers: key,
+      })
+      expect(list.statusCode).toBe(200)
+      expect((list.json() as { lids: unknown[] }).lids.length).toBe(1)
+
+      const count = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/lids/count`,
+        headers: key,
+      })
+      expect(count.statusCode).toBe(200)
+      expect((count.json() as { count: number }).count).toBe(1)
+    })
+  })
+
+  describe('presence', () => {
+    it('sets presence and chatstate', async () => {
+      const p = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/presence`,
+        headers: key,
+        payload: { type: 'available' },
+      })
+      expect(p.statusCode).toBe(200)
+      expect(ctx.client.presence.send).toHaveBeenCalled()
+
+      const cs = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/chats/5511888888888/chatstate`,
+        headers: key,
+        payload: { state: 'composing' },
+      })
+      expect(cs.statusCode).toBe(200)
+      expect(ctx.client.presence.sendChatstate).toHaveBeenCalled()
+    })
+  })
+
+  describe('messages edit/revoke/reply', () => {
+    it('edit and revoke existing message', async () => {
+      await ctx.messages.upsert({
+        instanceName: INSTANCE,
+        messageId: 'EDITME',
+        chatJid: '5511888888888@s.whatsapp.net',
+        fromMe: true,
+        type: 'text',
+        body: 'old',
+      })
+      const edit = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/edit`,
+        headers: key,
+        payload: { to: '5511888888888', messageId: 'EDITME', text: 'new text' },
+      })
+      expect(edit.statusCode).toBe(200)
+      expect((await ctx.messages.get(INSTANCE, 'EDITME'))?.body).toBe('new text')
+
+      const rev = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/revoke`,
+        headers: key,
+        payload: { to: '5511888888888', messageId: 'EDITME' },
+      })
+      expect(rev.statusCode).toBe(200)
+    })
+
+    it('reply quotes a message', async () => {
+      const res = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/messages/reply`,
+        headers: key,
+        payload: {
+          to: '5511888888888',
+          text: 'replying',
+          quotedMessageId: 'CHATMSG1',
+        },
+      })
+      expect(res.statusCode).toBe(200)
+    })
+  })
+
+  describe('chats mutations', () => {
+    it('archive + mark read', async () => {
+      const jid = encodeURIComponent('5511888888888@s.whatsapp.net')
+      const arch = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/chats/${jid}/archive`,
+        headers: key,
+      })
+      expect(arch.statusCode).toBe(200)
+
+      const unarch = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/chats/${jid}/unarchive`,
+        headers: key,
+      })
+      expect(unarch.statusCode).toBe(200)
+
+      const read = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/chats/${jid}/messages/read`,
+        headers: key,
+        payload: { messageIds: ['CHATMSG1'] },
+      })
+      expect(read.statusCode).toBe(200)
+      expect(ctx.client.message.sendReceipt).toHaveBeenCalled()
+    })
+
+    it('get single message by id', async () => {
+      const res = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/chats/${encodeURIComponent('5511888888888@s.whatsapp.net')}/messages/CHATMSG1`,
+        headers: key,
+      })
+      expect(res.statusCode).toBe(200)
+    })
+  })
+
+  describe('privacy', () => {
+    it('get and set privacy settings', async () => {
+      const get = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/${INSTANCE}/privacy`,
+        headers: key,
+      })
+      expect(get.statusCode).toBe(200)
+      expect(ctx.client.privacy.getPrivacySettings).toHaveBeenCalled()
+
+      const set = await ctx.app.inject({
+        method: 'POST',
+        url: `/v1/instances/${INSTANCE}/privacy`,
+        headers: key,
+        payload: { setting: 'last', value: 'contacts' },
+      })
+      expect(set.statusCode).toBe(200)
+    })
+  })
+
+  describe('auth scoping', () => {
+    it('instance key cannot access other instance', async () => {
+      const res = await ctx.app.inject({
+        method: 'GET',
+        url: `/v1/instances/other/chats`,
+        headers: key,
+      })
+      expect([403, 404].includes(res.statusCode)).toBe(true)
+    })
+
+    it('admin can list instances', async () => {
+      const res = await ctx.app.inject({ method: 'GET', url: '/v1/instances', headers: admin })
+      expect(res.statusCode).toBe(200)
+    })
+  })
+})

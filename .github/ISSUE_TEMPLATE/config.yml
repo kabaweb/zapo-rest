@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: zapo-js (protocol engine)
+    url: https://github.com/vinikjkkj/zapo/issues
+    about: Protocol, Signal, transport, and library bugs belong upstream.
+  - name: Security vulnerability
+    url: https://github.com/OWNER/zapo-rest/security/advisories/new
+    about: Report security issues privately (see SECURITY.md).

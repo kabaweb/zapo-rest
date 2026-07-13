@@ -1,0 +1,8 @@
+packages:
+  - '.'
+
+# Allow native / postinstall builds used by the stack
+allowBuilds:
+  esbuild: true
+  sharp: true
+  zapo-js: true
