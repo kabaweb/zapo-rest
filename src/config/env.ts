@@ -166,6 +166,40 @@ const envSchema = z
     /** Max call PCM recording duration in seconds (default 2h). Further samples are dropped. */
     CALL_RECORDING_MAX_SECONDS: z.coerce.number().int().positive().default(7200),
 
+    // ── SIP Trunk ──────────────────────────────────────────────────────────────
+    /** Enable SIP trunk registration and bridging. Requires Asterisk, FreeSWITCH, or direct SIP trunk provider. */
+    SIP_TRUNK_ENABLED: boolFromString.default(false),
+    /** SIP transport protocol. */
+    SIP_TRANSPORT: z.enum(['udp', 'tcp']).default('udp'),
+    /** Local IP the SIP UA binds to. */
+    SIP_LOCAL_HOST: z.string().default('0.0.0.0'),
+    /** Local SIP port (default 5060). */
+    SIP_LOCAL_PORT: z.coerce.number().int().positive().default(5060),
+    /** SIP proxy / trunk server hostname or IP. */
+    SIP_PROXY_HOST: z.string().default('sip.example.com'),
+    /** SIP proxy port (default 5060). */
+    SIP_PROXY_PORT: z.coerce.number().int().positive().default(5060),
+    /** SIP auth username. */
+    SIP_USERNAME: z.string().default(''),
+    /** SIP auth password. */
+    SIP_PASSWORD: z.string().default(''),
+    /** SIP display name for From header. */
+    SIP_DISPLAY_NAME: z.string().default('Zapo SIP'),
+    /** SIP realm / domain for auth. */
+    SIP_REALM: z.string().default('sip.example.com'),
+    /** Audio codec for SIP leg. ulaw = G.711 mu-law (North America/Japan), alaw = G.711 a-law (rest of world). */
+    SIP_CODEC: z.enum(['alaw', 'ulaw']).default('alaw'),
+    /** SIP REGISTER expiry in seconds. Re-registration happens at half this interval. */
+    SIP_REGISTER_EXPIRY_SECS: z.coerce.number().int().positive().default(3600),
+    /**
+     * DID → WhatsApp phone mapping for inbound SIP calls.
+     * Format: "DID1=5511999999999,DID2=5511888888888"
+     * When a SIP INVITE arrives for sip:DID1@realm, the call is bridged to WhatsApp number 5511999999999.
+     */
+    SIP_DID_MAPPING: z.string().optional(),
+    /** Default WhatsApp destination DID when no explicit mapping matches the inbound request URI. */
+    SIP_DEFAULT_DST_DID: z.string().optional(),
+
     /** Speech-to-text transcription (Groq Whisper or OpenAI-compatible API). */
     STT_ENABLED: boolFromString.default(false),
     /** Base URL e.g. https://api.groq.com/openai */

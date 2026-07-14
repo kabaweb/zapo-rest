@@ -261,12 +261,17 @@ CREATE TABLE IF NOT EXISTS app_calls (
  recording_enabled BOOLEAN NOT NULL DEFAULT false,
  recording_status TEXT NOT NULL DEFAULT 'none',
  -- none (ringing / not answered yet) | recording (answered, capturing) | ready | failed | disabled
- recording_storage_key TEXT,
- recording_url TEXT,
- recording_mime TEXT,
- recording_bytes BIGINT,
- recording_error TEXT,
- raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+  -- SIP trunk bridge fields (null when call is purely WhatsApp)
+  origin TEXT NOT NULL DEFAULT 'whatsapp',
+  -- 'whatsapp' | 'sip' | 'bridged'
+  sip_call_id TEXT,
+  trunk_id TEXT,
+  recording_storage_key TEXT,
+  recording_url TEXT,
+  recording_mime TEXT,
+  recording_bytes BIGINT,
+  recording_error TEXT,
+  raw JSONB NOT NULL DEFAULT '{}'::jsonb,
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  PRIMARY KEY (instance_name, call_id)

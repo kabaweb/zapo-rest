@@ -1,0 +1,76 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Override para testar a integração SIP trunk do zapo-rest com Asterisk local.
+#
+# USO:
+#   docker compose -f docker-compose.yml -f docker-compose.sip.yml up -d
+#
+# O que este arquivo adiciona:
+#   1. Container Asterisk 22 com PJSIP — registrador SIP + dialplan de teste
+#   2. Variáveis de ambiente SIP no container `api` do zapo-rest
+#   3. Rede interna `sip-net` para comunicação zapo-rest ↔ Asterisk
+#
+# Após subir:
+#   - Asterisk:       UDP 5060 (SIP) + UDP 10000-20000 (RTP)
+#   - Status SIP:     GET  http://localhost:3000/v1/sip/status
+#   - Chamada out:    POST http://localhost:3000/v1/instances/:name/calls/sip
+#   - Softphone test: conecte em sip:test@127.0.0.1:5060 (senha: test123)
+# ──────────────────────────────────────────────────────────────────────────────
+
+networks:
+  sip-net:
+    driver: bridge
+
+services:
+  # ── Asterisk 22 (PJSIP) ────────────────────────────────────────────────────
+  asterisk:
+    image: asterisk/asterisk:22
+    container_name: zapo-asterisk
+    restart: unless-stopped
+    networks:
+      - sip-net
+    ports:
+      # SIP signaling
+      - '5060:5060/udp'
+      - '5060:5060/tcp'
+      # RTP media range
+      - '10000-10100:10000-10100/udp'
+    volumes:
+      # Monta os arquivos de configuração
+      - ./sip-test/asterisk/pjsip.conf:/etc/asterisk/pjsip.conf:ro
+      - ./sip-test/asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./sip-test/asterisk/asterisk.conf:/etc/asterisk/asterisk.conf:ro
+      - ./sip-test/asterisk/modules.conf:/etc/asterisk/modules.conf:ro
+      - ./sip-test/asterisk/cdr.conf:/etc/asterisk/cdr.conf:ro
+    environment:
+      # Desabilita módulos que não precisamos no teste
+      AST_MODULES: ''
+    healthcheck:
+      test: ['CMD', 'asterisk', '-rx', 'core show version']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── API zapo-rest com SIP habilitado ───────────────────────────────────────
+  api:
+    networks:
+      - sip-net
+    environment:
+      # ── SIP Trunk ──────────────────────────────────────────────────────────
+      SIP_TRUNK_ENABLED: 'true'
+      SIP_TRANSPORT: udp
+      SIP_LOCAL_HOST: '0.0.0.0'
+      SIP_LOCAL_PORT: '5070'
+      SIP_PROXY_HOST: asterisk
+      SIP_PROXY_PORT: '5060'
+      SIP_USERNAME: zapo
+      SIP_PASSWORD: zapo123
+      SIP_DISPLAY_NAME: 'Zapo SIP'
+      SIP_REALM: asterisk
+      SIP_CODEC: alaw
+      SIP_REGISTER_EXPIRY_SECS: '3600'
+      SIP_DID_MAPPING: '1001=5511999999999'
+      SIP_DEFAULT_DST_DID: '5511999999999'
+    ports:
+      # Porta SIP local do zapo-rest (diferente da 5060 do Asterisk)
+      - '5070:5070/udp'

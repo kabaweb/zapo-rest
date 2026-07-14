@@ -34,6 +34,7 @@ import { metricsRoutes } from '~/routes/metrics'
 import { presenceRoutes } from '~/routes/presence'
 import { privacyRoutes } from '~/routes/privacy'
 import { profileRoutes } from '~/routes/profile'
+import { sipRoutes } from '~/routes/sip'
 import { statusRoutes } from '~/routes/status'
 import { voipWsRoutes } from '~/routes/voip-ws'
 import { webhookRoutes } from '~/routes/webhooks'
@@ -150,6 +151,12 @@ export async function buildApp(deps: BuildAppDeps) {
     calls: deps.calls,
     callRecording: deps.callRecording,
     mediaStorage: deps.mediaStorage,
+    cache: deps.cache,
+  })
+  await app.register(sipRoutes, {
+    env: deps.env,
+    manager: deps.manager,
+    calls: deps.calls,
     cache: deps.cache,
   })
   await app.register(blastRoutes, {

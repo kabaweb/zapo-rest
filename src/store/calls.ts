@@ -13,6 +13,9 @@ export type AppCall = {
   startedAt: Date
   endedAt: Date | null
   durationSecs: number | null
+  origin: string
+  sipCallId: string | null
+  trunkId: string | null
   recordingEnabled: boolean
   recordingStatus: CallRecordingStatus
   recordingStorageKey: string | null
@@ -33,6 +36,9 @@ type Row = {
   started_at: Date
   ended_at: Date | null
   duration_secs: number | null
+  origin: string
+  sip_call_id: string | null
+  trunk_id: string | null
   recording_enabled: boolean
   recording_status: string
   recording_storage_key: string | null
@@ -54,6 +60,9 @@ function mapRow(r: Row): AppCall {
     startedAt: r.started_at,
     endedAt: r.ended_at,
     durationSecs: r.duration_secs,
+    origin: r.origin ?? 'whatsapp',
+    sipCallId: r.sip_call_id,
+    trunkId: r.trunk_id,
     recordingEnabled: r.recording_enabled,
     recordingStatus: r.recording_status as CallRecordingStatus,
     recordingStorageKey: r.recording_storage_key,
@@ -80,6 +89,8 @@ export function toPublicCall(c: AppCall, opts?: { instanceName?: string }) {
     startedAt: c.startedAt.toISOString(),
     endedAt: c.endedAt?.toISOString() ?? null,
     durationSecs: c.durationSecs,
+    origin: c.origin,
+    sipCallId: c.sipCallId,
     recording: {
       enabled: c.recordingEnabled,
       status: c.recordingStatus,
@@ -103,18 +114,23 @@ export class CallStore {
     mediaType?: string
     state?: string | null
     recordingEnabled?: boolean
+    origin?: string
+    sipCallId?: string | null
   }): Promise<AppCall> {
     // History row only — recording_status stays 'none' until the call is answered
     // (CallRecordingManager starts the PCM recorder on connecting/active).
     const { rows } = await this.pool.query<Row>(
       `INSERT INTO app_calls (
          instance_name, call_id, peer_jid, direction, media_type, state,
+         origin, sip_call_id,
          recording_enabled, recording_status
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'none')
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'none')
        ON CONFLICT (instance_name, call_id) DO UPDATE SET
          peer_jid = COALESCE(EXCLUDED.peer_jid, app_calls.peer_jid),
          direction = COALESCE(EXCLUDED.direction, app_calls.direction),
          state = COALESCE(EXCLUDED.state, app_calls.state),
+         origin = COALESCE(EXCLUDED.origin, app_calls.origin),
+         sip_call_id = COALESCE(EXCLUDED.sip_call_id, app_calls.sip_call_id),
          recording_enabled = app_calls.recording_enabled OR EXCLUDED.recording_enabled,
          updated_at = now()
        RETURNING *`,
@@ -125,6 +141,8 @@ export class CallStore {
         input.direction ?? 'unknown',
         input.mediaType ?? 'audio',
         input.state ?? null,
+        input.origin ?? 'whatsapp',
+        input.sipCallId ?? null,
         input.recordingEnabled ?? false,
       ],
     )
