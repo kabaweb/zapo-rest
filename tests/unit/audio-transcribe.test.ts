@@ -8,7 +8,7 @@ describe('transcribeAudio', () => {
   })
 
   it('posts multipart to OpenAI-compatible path and returns text', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
       expect(String(input)).toBe('https://api.groq.com/openai/v1/audio/transcriptions')
       expect(init?.method).toBe('POST')
       const headers = init?.headers as Record<string, string>
@@ -35,7 +35,7 @@ describe('transcribeAudio', () => {
   })
 
   it('joins trailing slash base URL without double slash issues', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
       expect(String(input)).toBe('https://api.example.com/openai/v1/audio/transcriptions')
       return new Response(JSON.stringify({ text: 'ok' }), { status: 200 })
     })
