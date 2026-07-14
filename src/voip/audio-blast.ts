@@ -1,14 +1,13 @@
 import type { InstanceManager } from '~/instances/manager'
 import { asVoipClient } from '~/instances/wa-client'
-import type { CacheClient } from '~/redis/client'
-import { resolveRecipientJid } from '~/lib/phone-resolve'
 import { getLogger } from '~/lib/logger'
-import { downloadAndDecode, encodeResponseWav, removeTempDir } from '~/voip/audio-decode'
+import { resolveRecipientJid } from '~/lib/phone-resolve'
 import type { MediaStorage } from '~/media/storage'
-import { isAnsweredCallState } from '~/voip/recording-manager'
+import type { CacheClient } from '~/redis/client'
+import type { CallStore } from '~/store/calls'
+import { downloadAndDecode, encodeResponseWav, removeTempDir, TARGET_SAMPLE_RATE } from '~/voip/audio-decode'
 import { transcribeAudio } from '~/voip/audio-transcribe'
-
-const TARGET_SAMPLE_RATE = 16_000
+import { isAnsweredCallState } from '~/voip/recording-manager'
 
 export type AudioBlastSttOpts = {
   enabled: boolean
@@ -27,8 +26,11 @@ export type AudioBlastRequest = {
   responseTimeoutMs: number
   callTimeoutMs: number
   recordResponse: boolean
+  /** Cap captured inbound PCM duration (seconds). Defaults to CALL_RECORDING_MAX_SECONDS. */
+  maxCaptureSeconds?: number
   mediaStorage?: MediaStorage
   cache?: CacheClient
+  calls?: CallStore
   stt?: AudioBlastSttOpts
 }
 
@@ -43,12 +45,22 @@ export type AudioBlastResult = {
   error?: string
 }
 
+type VoipClient = ReturnType<typeof asVoipClient>
+type ClientEmitter = {
+  on: (e: string, fn: (...args: unknown[]) => void) => void
+  off: (e: string, fn: (...args: unknown[]) => void) => void
+}
+
 async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms))
 }
 
+function asEmitter(client: VoipClient): ClientEmitter {
+  return client as unknown as ClientEmitter
+}
+
 async function waitForCallAnswered(
-  client: ReturnType<typeof asVoipClient>,
+  client: VoipClient,
   callId: string,
   timeoutMs: number,
   signal: AbortSignal,
@@ -64,29 +76,8 @@ async function waitForCallAnswered(
   type CallInfo = { callId?: string; stateData?: { state?: string }; isEnded?: boolean }
 
   return new Promise((resolve) => {
-    const cleanup = () => {
-      try {
-        ;(client as unknown as { off: (e: string, fn: unknown) => void }).off(
-          'voip_call_state',
-          onState as unknown as (...args: unknown[]) => void,
-        )
-        ;(client as unknown as { off: (e: string, fn: unknown) => void }).off(
-          'voip_call_ended',
-          onEnded as unknown as (...args: unknown[]) => void,
-        )
-      } catch {
-        /* */
-      }
-    }
-
+    const emitter = asEmitter(client)
     let resolved = false
-    const done = (answered: boolean) => {
-      if (resolved) return
-      resolved = true
-      clearInterval(timer)
-      cleanup()
-      resolve(answered)
-    }
 
     const onState = (c: CallInfo) => {
       if ((c.callId ?? '').toLowerCase() !== callId.toLowerCase()) return
@@ -107,14 +98,25 @@ async function waitForCallAnswered(
       done(false)
     }
 
-    ;(client as unknown as { on: (e: string, fn: unknown) => void }).on(
-      'voip_call_state',
-      onState as unknown as (...args: unknown[]) => void,
-    )
-    ;(client as unknown as { on: (e: string, fn: unknown) => void }).on(
-      'voip_call_ended',
-      onEnded as unknown as (...args: unknown[]) => void,
-    )
+    const cleanup = () => {
+      try {
+        emitter.off('voip_call_state', onState as (...args: unknown[]) => void)
+        emitter.off('voip_call_ended', onEnded as (...args: unknown[]) => void)
+      } catch {
+        /* */
+      }
+    }
+
+    const done = (answered: boolean) => {
+      if (resolved) return
+      resolved = true
+      clearInterval(timer)
+      cleanup()
+      resolve(answered)
+    }
+
+    emitter.on('voip_call_state', onState as (...args: unknown[]) => void)
+    emitter.on('voip_call_ended', onEnded as (...args: unknown[]) => void)
 
     const timer = setInterval(() => {
       if (signal.aborted) {
@@ -132,30 +134,57 @@ async function waitForCallAnswered(
   })
 }
 
-function collectInboundAudio(
-  client: ReturnType<typeof asVoipClient>,
+type InboundCapture = {
+  chunks: Float32Array[]
+  samples: number
+  stop: () => void
+}
+
+/** Subscribe to inbound PCM; stop() must be called to unsubscribe. */
+function startInboundCapture(
+  client: VoipClient,
   callId: string,
   signal: AbortSignal,
-): Float32Array[] {
+  maxSamples: number,
+): InboundCapture {
   const chunks: Float32Array[] = []
+  let samples = 0
+  let stopped = false
+  const emitter = asEmitter(client)
 
-  // biome-ignore lint/suspicious/noExplicitAny: plugin event
+  // biome-ignore lint/suspicious/noExplicitAny: plugin event payload
   const onAudio = ({ call, pcm }: { call: any; pcm: Float32Array }) => {
+    if (stopped || signal.aborted) return
     if ((call?.callId ?? '').toLowerCase() !== callId.toLowerCase()) return
-    if (signal.aborted) return
-    chunks.push(new Float32Array(pcm))
+    if (samples >= maxSamples) return
+    const room = maxSamples - samples
+    const take = Math.min(pcm.length, room)
+    chunks.push(new Float32Array(pcm.subarray(0, take)))
+    samples += take
   }
 
-  ;(client as unknown as { on: (e: string, fn: unknown) => void }).on(
-    'voip_call_inbound_audio',
-    onAudio as unknown as (...args: unknown[]) => void,
-  )
+  const handler = onAudio as (...args: unknown[]) => void
+  emitter.on('voip_call_inbound_audio', handler)
 
-  return chunks
+  return {
+    chunks,
+    get samples() {
+      return samples
+    },
+    stop() {
+      if (stopped) return
+      stopped = true
+      try {
+        emitter.off('voip_call_inbound_audio', handler)
+      } catch {
+        /* */
+      }
+    },
+  }
 }
 
 async function feedAudio(
-  client: ReturnType<typeof asVoipClient>,
+  client: VoipClient,
   callId: string,
   samples: Float32Array,
   signal: AbortSignal,
@@ -208,6 +237,11 @@ async function feedAudio(
     await sleep(0)
   }
 
+  if (signal.aborted || offset < samples.length) {
+    log.warn({ offset, total: samples.length, aborted: signal.aborted }, 'audio feed incomplete')
+    return false
+  }
+
   // Drain remaining buffer
   while (client.voip.getLiveBufferMs(callId) > 15 && !signal.aborted) {
     await sleep(30)
@@ -222,12 +256,27 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
   const startedAt = Date.now()
   let tempDir = ''
   let callId = ''
+  let capture: InboundCapture | null = null
 
   try {
-    const { manager, instanceName, to, audioUrl, responseTimeoutMs, callTimeoutMs, recordResponse, mediaStorage, cache, stt } =
-      opts
+    const {
+      manager,
+      instanceName,
+      to,
+      audioUrl,
+      responseTimeoutMs,
+      callTimeoutMs,
+      recordResponse,
+      mediaStorage,
+      cache,
+      calls,
+      stt,
+    } = opts
 
-    const client = asVoipClient(manager.requireRegisteredClient(instanceName))
+    const maxCaptureSeconds = opts.maxCaptureSeconds ?? 120
+    const maxSamples = Math.max(1, Math.floor(maxCaptureSeconds * TARGET_SAMPLE_RATE))
+
+    const client = asVoipClient(await manager.requireOpenClient(instanceName))
 
     log.info({ to }, 'starting blast call')
     const peerJid = await resolveRecipientJid(client, to, cache)
@@ -242,6 +291,18 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
     client.voip.setExternalAudioMode(callId, true)
     log.info({ callId, peerJid }, 'call started')
 
+    if (calls) {
+      await calls.upsertStart({
+        instanceName,
+        callId,
+        peerJid,
+        direction: 'outgoing',
+        mediaType: 'audio',
+        state: 'ringing',
+        recordingEnabled: recordResponse,
+      })
+    }
+
     const abort = new AbortController()
 
     const answered = await waitForCallAnswered(client, callId, callTimeoutMs, abort.signal)
@@ -251,6 +312,9 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
         await client.voip.endCall(callId)
       } catch {
         /* */
+      }
+      if (calls) {
+        await calls.markEnded(instanceName, callId, { endReason: 'not_answered', state: 'ended' })
       }
       return {
         callId,
@@ -264,19 +328,25 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
       }
     }
 
-    const inboundChunks = collectInboundAudio(client, callId, abort.signal)
+    if (calls) {
+      await calls.updateState(instanceName, callId, { state: 'active' })
+      if (recordResponse) {
+        await calls.markRecordingStarted(instanceName, callId)
+      }
+    }
+
+    capture = startInboundCapture(client, callId, abort.signal, maxSamples)
 
     const played = await feedAudio(client, callId, pcm, abort.signal)
     log.info({ played }, 'audio playback finished')
 
-    // Wait for response
     if (recordResponse && played) {
-      const waitMs = responseTimeoutMs
-      log.info({ waitMs }, 'waiting for response')
-      await sleep(waitMs)
+      log.info({ waitMs: responseTimeoutMs }, 'waiting for response')
+      await sleep(responseTimeoutMs)
     }
 
     abort.abort()
+    capture.stop()
 
     try {
       await client.voip.endCall(callId)
@@ -284,7 +354,7 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
       /* */
     }
 
-    // Flatten captured audio
+    const inboundChunks = capture.chunks
     let totalSamples = 0
     for (const c of inboundChunks) {
       totalSamples += c.length
@@ -294,6 +364,15 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
     for (const c of inboundChunks) {
       merged.set(c, off)
       off += c.length
+    }
+
+    const responseMs = Math.round((totalSamples / TARGET_SAMPLE_RATE) * 1000)
+    if (calls) {
+      await calls.markEnded(instanceName, callId, {
+        endReason: 'completed',
+        durationSecs: Math.round((Date.now() - startedAt) / 1000),
+        state: 'ended',
+      })
     }
 
     let recordingUrl: string | null = null
@@ -306,12 +385,32 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
           filename: `blast-${callId}.wav`,
           messageId: `blast-${callId}`,
         })
-        recordingUrl =
-          stored.url ?? `/v1/instances/${encodeURIComponent(instanceName)}/calls/${encodeURIComponent(callId)}/recording`
+        const downloadPath = `/v1/instances/${encodeURIComponent(instanceName)}/calls/${encodeURIComponent(callId)}/recording`
+        recordingUrl = stored.url ?? downloadPath
+        if (calls) {
+          await calls.setRecordingResult(instanceName, callId, {
+            status: 'ready',
+            storageKey: stored.storageKey,
+            url: recordingUrl,
+            mime: 'audio/wav',
+            bytes: stored.sizeBytes,
+          })
+        }
         log.info({ recordingUrl, bytes: stored.sizeBytes }, 'response recording saved')
       } catch (err) {
         log.warn({ err }, 'failed to save response recording')
+        if (calls) {
+          await calls.setRecordingResult(instanceName, callId, {
+            status: 'failed',
+            error: err instanceof Error ? err.message : 'recording save failed',
+          })
+        }
       }
+    } else if (recordResponse && calls && totalSamples === 0) {
+      await calls.setRecordingResult(instanceName, callId, {
+        status: 'failed',
+        error: 'no inbound audio captured',
+      })
     }
 
     let transcription: string | null = null
@@ -334,19 +433,17 @@ export async function executeAudioBlast(opts: AudioBlastRequest): Promise<AudioB
       }
     }
 
-    const totalMs = Date.now() - startedAt
-    const responseMs = Math.round(totalSamples / TARGET_SAMPLE_RATE * 1000)
-
     return {
       callId,
       peerJid,
       audioPlayed: played,
       recordingUrl: totalSamples > 0 ? recordingUrl : null,
       responseDurationMs: responseMs,
-      totalDurationMs: totalMs,
+      totalDurationMs: Date.now() - startedAt,
       transcription,
     }
   } finally {
+    capture?.stop()
     if (tempDir) {
       await removeTempDir(tempDir)
     }

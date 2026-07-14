@@ -83,14 +83,16 @@ export const blastRoutes: FastifyPluginAsync<BlastRoutesDeps> = async (app, deps
         responseTimeoutMs: body.responseTimeoutMs ?? 5000,
         callTimeoutMs: body.callTimeoutMs ?? 30000,
         recordResponse: body.recordResponse ?? true,
+        maxCaptureSeconds: env.CALL_RECORDING_MAX_SECONDS,
         mediaStorage,
         cache,
+        calls,
         stt:
           body.transcribe !== false && env.STT_ENABLED && env.STT_API_URL && env.STT_API_KEY
             ? {
                 enabled: true,
-                apiUrl: env.STT_API_URL as string,
-                apiKey: env.STT_API_KEY as string,
+                apiUrl: env.STT_API_URL,
+                apiKey: env.STT_API_KEY,
                 model: env.STT_MODEL,
                 temperature: env.STT_TEMPERATURE,
                 language: body.sttLanguage ?? env.STT_LANGUAGE,
