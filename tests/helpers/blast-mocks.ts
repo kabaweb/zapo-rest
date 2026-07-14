@@ -119,7 +119,7 @@ export function createMockVoipBlastClient(opts?: {
 export function mockFetchWav(wav: Buffer = makePcm16Wav(320)): void {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input)
       if (url.includes('/v1/audio/transcriptions') || url.includes('transcriptions')) {
         return new Response(JSON.stringify({ text: 'olá teste', language: 'pt', duration: 1.2 }), {
